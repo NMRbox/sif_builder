@@ -1,0 +1,20 @@
+#
+# top level entries required
+#
+---
+base:  /binarysource/sifbase/nmrbox.sif
+def: /tmp/sb/def/testenv2.def
+sif: /tmp/sb/sif/test.sif
+software:
+  #software can be blank. If not version specified latest one is used
+  nmrpipe:
+  nmrglue: 11.0  
+  pymol:
+packages:
+  # packages can be blank
+  nmrbox-tool-julia:
+  nmrbox-tool-go: 16-1 
+  nmrbox-paths-paas:
+data: False
+  #if False "data" packages are not installed. This is VERY experimental. 
+...
