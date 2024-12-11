@@ -1,11 +1,9 @@
-#!/usr/bin/env python3
 import argparse
 import datetime
 import logging
-import os
 import shutil
 import subprocess
-import sys
+from pathlib import Path
 from typing import List
 
 import argparser_adapter
@@ -15,7 +13,7 @@ from argparser_adapter import ChoiceCommand, ArgparserAdapter
 from sifbuilder import _logger
 from sifbuilder.statusparser import parse_nmrbox_list, Software
 
-APPTAINER = '/usr/bin/apptainer'
+APPTAINER = Path('/usr/bin/apptainer')
 
 _TEMPLATE = """BootStrap: localimage
 From: {base} 
@@ -30,10 +28,9 @@ From: {base}
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get -qq update 
 	apt-get -qq install {packages} 
-
-%environment
-    export LC_ALL=C
 """
+_ENV = """%environment
+    export LC_ALL=C"""
 
 actionchoice = argparser_adapter.Choice("action", True, help='Action:')
 
@@ -48,15 +45,15 @@ class Builder:
     def configure(self, config):
         """Configure from YAML (most likely)"""
         self.config = config
-        self.defpath = self.config['def']
-        self.sifpath = self.config['sif']
+        self.defpath = Path(self.config['def'])
+        self.sifpath = Path(self.config['sif'])
 
     def _parse(self):
         """Parse config for packages to install"""
         self.inventory = dict(parse_nmrbox_list())
         self.software: List[Software] = []
         self.data = self.config['data']
-        if (swdict := self.config['software']) is None:
+        if (swdict := self.config.get('software', None)) is None:
             swdict = {}  # use empty placeholder to simplify indenting / program flow
         for s, vers in swdict.items():
             softwarename = s.upper()
@@ -73,7 +70,7 @@ class Builder:
                 available = self.inventory[softwarename]
                 if (vstr := str(vers)) not in available:
                     raise ValueError(
-                        f"Version {vstr} of software {softwarename} not found. " 
+                        f"Version {vstr} of software {softwarename} not found. "
                         f"Valid values are: {','.join(available)}")
                 self.software.append(added := available[vstr])
                 _logger.debug(f"{softwarename} {vstr} resolves to {added}")
@@ -93,8 +90,8 @@ class Builder:
     def generate(self):
         """generate def file"""
         self._parse()
-        if os.path.exists(self.defpath) and not self.force:
-            raise ValueError(f"{self.defpath} already present")
+        if self.defpath.exists() and not self.force:
+            raise ValueError(f"{self.defpath.as_posix()} already present")
         software_packages = []
         for s in self.software:
             software_packages.extend(s.packages)
@@ -107,40 +104,54 @@ class Builder:
         pspec = ' '.join(combined)
         software = '\n'.join([f'# {s}' for s in self.software])
         named_packages = '\n'.join([f'# {p}' for p in self.debpackages])
-
-        os.makedirs(os.path.dirname(self.defpath), exist_ok=True)
+        self.defpath.parent.mkdir(exist_ok=True)
         with open(self.defpath, 'w') as f:
             print(_TEMPLATE.format(base=self.config['base'],
                                    packages=pspec,
                                    software=software,
                                    named_packages=named_packages),
                   file=f)
+            self._add_enviroment(f)
+            self.__add_runscript(f)
         print(f"Wrote {self.defpath}")
+
+    def _add_enviroment(self, f):
+        """Add environment setting from config, if any"""
+        print(_ENV, file=f)
+        edict = self.config.get("environment", {})
+        for env, value in edict.get('append', {}).items():
+            print(f'    export {env}=${env}:{value}', file=f)
+
+    def __add_runscript(self,f):
+        runlist= self.config.get("run",[])
+        if runlist:
+            print('\n%runscript',file=f)
+            for cmd in runlist:
+                print(f'   {cmd} ',file=f)
 
     def _check_paths(self):
         """Check paths, raise error or overwrite, depending on self.force"""
-        if not os.path.isfile(APPTAINER):
-            raise ValueError(f"{APPTAINER} not found. Install apptainer debian package")
-        if not os.path.isfile(self.defpath):
-            print(f"{self.defpath} not found", file=sys.stderr)
-            sys.exit(1)
-        if os.path.exists(self.sifpath):
+        if not APPTAINER.is_file():
+            raise ValueError(f"{APPTAINER.as_posix()} not found. Install apptainer debian package")
+        if not self.defpath.is_file():
+            self.generate()
+        if self.sifpath.exists():
             if not self.force:
-                raise ValueError(f"{self.sifpath} already present")
-            if os.path.isdir(self.sifpath):
-                shutil.rmtree((self.sifpath))
+                raise ValueError(f"{self.sifpath.as_posix()} already present")
+            if self.sifpath.is_dir():
+                shutil.rmtree(self.sifpath)
             else:
-                os.remove(self.sifpath)
-        sdir = os.path.dirname(self.sifpath)
-        os.makedirs(sdir, exist_ok=True)
+                self.sifpath.unlink()
+        self.sifpath.parent.mkdir(exist_ok=True)
 
-    def _run(self, cmd):
+    def _run(self, cmd_i):
         """Run a command after displaying to user"""
+        cmd = [item.as_posix() if isinstance(item, Path) else item for item in cmd_i]
         print(f"Running: {' '.join(cmd)}")
         if self.nolog:
             subprocess.run(cmd)
         else:
-            sname = os.path.basename(self.sifpath)
+            sname = self.sifpath.name
             ts = datetime.datetime.now().strftime(f"{sname}-%b%d-%H:%M:%S.log")
             with open(ts, 'w') as logfile:
                 print(f"logging to {logfile.name}")
