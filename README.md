@@ -1,4 +1,4 @@
-# sif_builder
+# sifbuilder
 
 **sifbuilder** facilitates the building of NMRbox based [Apptainer](https://apptainer.org/docs/user/main/) containers.
 Software can be specified either as NMRbox Software entries or debian package names. The most current

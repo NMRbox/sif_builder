@@ -21,6 +21,7 @@ where = ["src"]  # Specify the "src" directory to look for packages
 
 [project.scripts]
 sifbuilder = "sifbuilder.main:main"
+sifassemble = "sifbuilder.assembler:main"
 
 [build-system]
 requires = ["setuptools"]
