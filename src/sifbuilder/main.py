@@ -10,7 +10,7 @@ import argparser_adapter
 import yaml
 from argparser_adapter import ChoiceCommand, ArgparserAdapter
 
-from sifbuilder import _logger
+from sifbuilder import builder_logger
 from sifbuilder.statusparser import parse_nmrbox_list, Software
 
 APPTAINER = Path('/usr/bin/apptainer')
@@ -50,7 +50,7 @@ class Builder:
 
     def _parse(self):
         """Parse config for packages to install"""
-        self.inventory = dict(parse_nmrbox_list())
+        self.inventory : dict = dict(parse_nmrbox_list())
         self.software: List[Software] = []
         self.data = self.config['data']
         if (swdict := self.config.get('software', None)) is None:
@@ -63,9 +63,9 @@ class Builder:
                 candidates = list(self.inventory[softwarename].values())
                 latest = Software.latest_packages(candidates)
                 self.software.extend(latest)
-                if _logger.isEnabledFor(logging.DEBUG):
+                if builder_logger.isEnabledFor(logging.DEBUG):
                     lstr = ' '.join([str(s) for s in latest])
-                    _logger.debug(f"{softwarename} resolves to {lstr}")
+                    builder_logger.debug(f"{softwarename} resolves to {lstr}")
             else:
                 available = self.inventory[softwarename]
                 if (vstr := str(vers)) not in available:
@@ -73,7 +73,7 @@ class Builder:
                         f"Version {vstr} of software {softwarename} not found. "
                         f"Valid values are: {','.join(available)}")
                 self.software.append(added := available[vstr])
-                _logger.debug(f"{softwarename} {vstr} resolves to {added}")
+                builder_logger.debug(f"{softwarename} {vstr} resolves to {added}")
         self.debpackages: List[str] = []
         if (pkgdict := self.config['packages']) is None:
             pkgdict = {}
@@ -83,7 +83,7 @@ class Builder:
             else:
                 adding = f'{pkg}={version}'
             self.debpackages.append(adding)
-            _logger.debug(f"Adding {adding} from package: section")
+            builder_logger.debug(f"Adding {adding} from package: section")
         return self
 
     @ChoiceCommand(actionchoice)
@@ -95,10 +95,10 @@ class Builder:
         software_packages = []
         for s in self.software:
             software_packages.extend(s.packages)
-            _logger.debug(f"{s} adds {' '.join([p.package_spec for p in s.packages])}")
+            builder_logger.debug(f"{s} adds {' '.join([p.package_spec for p in s.packages])}")
             if self.data:
                 software_packages.extend(s.data_packages)
-                _logger.debug(f"{s} data packages {' '.join([p.package_spec for p in s.data_packages])}")
+                builder_logger.debug(f"{s} data packages {' '.join([p.package_spec for p in s.data_packages])}")
 
         combined = self.debpackages + [p.package_spec for p in software_packages]
         pspec = ' '.join(combined)
@@ -183,7 +183,7 @@ def main():
     parser.add_argument('--nolog', action='store_true', help="Apptainer output to stdout/stderr instead of log files")
 
     args = parser.parse_args()
-    _logger.setLevel(getattr(logging, args.loglevel))
+    builder_logger.setLevel(getattr(logging, args.loglevel))
     with open(args.yaml) as f:
         config = yaml.safe_load(f)
     builder.configure(config)

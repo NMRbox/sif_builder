@@ -82,6 +82,7 @@ class Builder:
             app = app_cfg['app']
             self.apps[app] = (app_d := {})
             pkgs = app_cfg.get('packages',None)
+            f: io.StringIO
             if pkgs:
                 with io.StringIO() as f:
                     print(f"    apt-get -qq install {' '.join(pkgs)}",file=f)

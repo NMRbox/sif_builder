@@ -1,5 +1,5 @@
 import logging
-_logger = logging.getLogger(__name__)
+builder_logger = logging.getLogger(__name__)
 __version__ = 1.0
 
 
