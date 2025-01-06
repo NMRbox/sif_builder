@@ -4,15 +4,14 @@ import io
 import logging
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Iterable, Tuple
+from typing import List, Iterable
 
 import argparser_adapter
 import yaml
 from argparser_adapter import ChoiceCommand, ArgparserAdapter
-
-from sifbuilder import _logger
-from sifbuilder.statusparser import parse_nmrbox_list, Software
+from sifbuilder import builder_logger
 
 APPTAINER = Path('/usr/bin/apptainer')
 
@@ -71,9 +70,11 @@ class Builder:
             raise ValueError(f"Missing yaml file {','.join(bad)}")
         configs = []
         for p in paths:
+            builder_logger.debug(f"Evaluate {p.as_posix()}")
             with open(p) as f:
                 dc = yaml.safe_load(f)
                 if dc.get('sifassembly',False):
+                    builder_logger.info(f"Reading {p.as_posix()}")
                     configs.append(dc)
         ordered = {c['app']:c for c in configs}
         for appname in sorted(ordered.keys()):
@@ -116,7 +117,7 @@ class Builder:
         """generate def file"""
         if self.defpath.exists() and not self.force:
             raise ValueError(f"{self.defpath.as_posix()} already present")
-        _logger.info(f"generating {self.defpath.as_posix}")
+        builder_logger.info(f"generating {self.defpath.as_posix}")
         with open(self.defpath, 'w') as f:
             print(_TEMPLATE.format(base=self.base), file=f)
             self._add_enviroment(f)
@@ -181,44 +182,60 @@ class Builder:
         self._run((APPTAINER, 'build', '--sandbox', self.sifpath, self.defpath))
 
 
-def directory_parse(primary,directories)->Tuple[Path,Iterable[Path]]:
-    yamls = set()
-    pri_yaml = None
-    for d in directories:
-       dpath = Path(d)
-       if not dpath.is_dir():
-           raise ValueError(f"{dpath.as_posix()} is not a directory")
-       for p in Path(dpath).glob('*yaml'):
-            if p.name == primary:
-                if pri_yaml is not None:
-                    raise ValueError(f"Duplicate {primary}, {p.as_posix()} and {pri_yaml.as_posix()}")
-                pri_yaml = p
-            else:
-                yamls.add(p)
-    if pri_yaml is None:
-        raise ValueError(f"Primary {primary}, not found in {yamls}" )
-    return pri_yaml,yamls
+@dataclass
+class ParseSpec:
+    directories: Iterable[str]
+    depth: int
+
+@dataclass
+class ParseOut:
+    yamls: Iterable[Path]
+
+
+class _DirectoryParser:
+
+    def __init__(self,p:ParseSpec):
+        self.spec = p
+        self.yamls : List[Path] = []
+
+    def _parse(self,directories,depth):
+        for dpath in directories:
+            if not dpath.is_dir():
+                raise ValueError(f"{dpath.as_posix()} is not a directory")
+            for p in Path(dpath).glob('*yaml'):
+                self.yamls.append(p)
+            if depth > 0:
+                subs = [d for d in dpath.iterdir() if d.is_dir()]
+                self._parse(subs,depth-1)
+
+    def parse(self):
+        dpaths = [Path(d) for d in self.spec.directories]
+        self._parse(dpaths,self.spec.depth)
+        return self.yamls
+
 
 
 def main():
     logging.basicConfig()
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('primary',help="primary configuration name")
+    parser.add_argument('primary',help="primary configuration file")
     builder = Builder()
     adapter = ArgparserAdapter(builder)
     adapter.register(parser)
     parser.add_argument('-d','--directory',action='append',help= "Directory to scan for yamls")
+    parser.add_argument('--depth' ,type=int,default=0,help="How far to descond into directories looking for yamls")
     parser.add_argument('-l', '--loglevel', default='WARN', help="Python logging level")
     parser.add_argument('--force', action='store_true', help="Overwrite existing def and sif")
     parser.add_argument('--nolog', action='store_true', help="Apptainer output to stdout/stderr instead of log files")
 
     args = parser.parse_args()
-    _logger.setLevel(getattr(logging, args.loglevel))
+    builder_logger.setLevel(getattr(logging, args.loglevel))
     builder.force = args.force
     builder.nolog = args.nolog
-    p,y = directory_parse(args.primary,args.directory)
-    builder.load(p)
-    builder.configure(y)
+    builder.load(args.primary)
+    dp = _DirectoryParser(ParseSpec(args.directory,args.depth))
+    yamls = dp.parse()
+    builder.configure(yamls)
 
     adapter.call_specified_methods(args)
 
