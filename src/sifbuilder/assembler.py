@@ -71,11 +71,14 @@ class Builder:
         configs = []
         for p in paths:
             builder_logger.debug(f"Evaluate {p.as_posix()}")
-            with open(p) as f:
-                dc = yaml.safe_load(f)
-                if dc.get('sifassembly',False):
-                    builder_logger.info(f"Reading {p.as_posix()}")
-                    configs.append(dc)
+            try:
+                with open(p) as f:
+                    dc = yaml.safe_load(f)
+                    if dc.get('sifassembly',False):
+                        builder_logger.info(f"Reading {p.as_posix()}")
+                        configs.append(dc)
+            except Exception as e:
+                builder_logger.info(f"Fail to parse {p.as_posix()} {e}")
         ordered = {c['app']:c for c in configs}
         for appname in sorted(ordered.keys()):
             app_cfg = ordered[appname]
